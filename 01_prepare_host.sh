@@ -27,9 +27,16 @@ if [[ $OS == ubuntu ]]; then
     sudo update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
     # (workaround) disable tdp_mmu to avoid
     # kernel crashes with  NULL pointer dereference
-    sudo modprobe -r -a kvm_intel kvm
-    sudo modprobe kvm tdp_mmu=0
-    sudo modprobe -a kvm kvm_intel
+    # note(elfosardo): run this only if we have kvm support
+    if grep -q vmx /proc/cpuinfo; then
+      sudo modprobe -r -a kvm_intel kvm
+      sudo modprobe kvm tdp_mmu=0
+      sudo modprobe -a kvm kvm_intel
+    elif grep -q svm /proc/cpuinfo; then
+      sudo modprobe -r -a kvm_amd kvm
+      sudo modprobe kvm tdp_mmu=0
+      sudo modprobe -a kvm kvm_amd
+    fi
   fi
 elif [[ $OS == "centos" || $OS == "rhel" ]]; then
   sudo dnf upgrade -y
@@ -63,7 +70,7 @@ source lib/network.sh
 ansible-galaxy install -r vm-setup/requirements.yml
 
 # Install required packages
-ANSIBLE_FORCE_COLOR=true ansible-playbook \
+ANSIBLE_FORCE_COLOR=true ansible-playbook -vvv \
   -e "working_dir=$WORKING_DIR" \
   -e "metal3_dir=$SCRIPTDIR" \
   -e "virthost=$HOSTNAME" \
@@ -111,20 +118,20 @@ fi
 
 if [ "${EPHEMERAL_CLUSTER}" == "minikube" ]; then
   if ! command -v minikube 2>/dev/null || [[ "$(minikube version --short)" != "${MINIKUBE_VERSION}" ]]; then
-      wget --no-verbose -O minikube https://storage.googleapis.com/minikube/releases/"${MINIKUBE_VERSION}"/minikube-linux-amd64
+      wget -O minikube https://storage.googleapis.com/minikube/releases/"${MINIKUBE_VERSION}"/minikube-linux-amd64
       chmod +x minikube
       sudo mv minikube /usr/local/bin/.
   fi
 
   if ! command -v docker-machine-driver-kvm2 2>/dev/null ; then
-      wget --no-verbose -O docker-machine-driver-kvm2 https://storage.googleapis.com/minikube/releases/"${MINIKUBE_VERSION}"/docker-machine-driver-kvm2
+      wget -O docker-machine-driver-kvm2 https://storage.googleapis.com/minikube/releases/"${MINIKUBE_VERSION}"/docker-machine-driver-kvm2
       chmod +x docker-machine-driver-kvm2
       sudo mv docker-machine-driver-kvm2 /usr/local/bin/.
   fi
 # Install Kind for both Kind and tilt
 else
   if ! command -v kind 2>/dev/null || [[ "v$(kind version -q)" != "$KIND_VERSION" ]]; then
-      wget --no-verbose -O ./kind https://github.com/kubernetes-sigs/kind/releases/download/"${KIND_VERSION}"/kind-"$(uname)"-amd64
+      wget -O ./kind https://github.com/kubernetes-sigs/kind/releases/download/"${KIND_VERSION}"/kind-"$(uname)"-amd64
       chmod +x ./kind
       sudo mv kind /usr/local/bin/.
   fi
@@ -138,14 +145,14 @@ KUBECTL_LOCAL=$(kubectl version --client -o json | jq -r '.clientVersion.gitVers
 KUBECTL_PATH=$(whereis -b kubectl | cut -d ":" -f2 | awk '{print $1}')
 
 if [ "$KUBECTL_LOCAL" != "$KUBECTL_LATEST" ]; then
-    wget --no-verbose -O kubectl "https://storage.googleapis.com/kubernetes-release/release/${KUBECTL_LATEST}/bin/linux/amd64/kubectl"
+    wget -O kubectl "https://storage.googleapis.com/kubernetes-release/release/${KUBECTL_LATEST}/bin/linux/amd64/kubectl"
     chmod +x kubectl
     KUBECTL_PATH="${KUBECTL_PATH:-/usr/local/bin/kubectl}"
     sudo mv kubectl "${KUBECTL_PATH}"
 fi
 
 if ! command -v kustomize 2>/dev/null ; then
-    wget --no-verbose "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+    wget "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
     tar -xzvf "kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
     chmod +x kustomize
     sudo mv kustomize /usr/local/bin/.
@@ -159,7 +166,7 @@ fi
 
 # Install clusterctl client
 function install_clusterctl() {
-  wget --no-verbose -O clusterctl https://github.com/kubernetes-sigs/cluster-api/releases/download/"${CAPIRELEASE}"/clusterctl-linux-amd64
+  wget -O clusterctl https://github.com/kubernetes-sigs/cluster-api/releases/download/"${CAPIRELEASE}"/clusterctl-linux-amd64
   chmod +x ./clusterctl
   sudo mv ./clusterctl /usr/local/bin/clusterctl
 }
@@ -191,7 +198,7 @@ mkdir -p "$IRONIC_IMAGE_DIR"
 pushd "$IRONIC_IMAGE_DIR"
 
 if [ ! -f "${IMAGE_NAME}" ] ; then
-    wget --no-verbose --no-check-certificate "${IMAGE_LOCATION}/${IMAGE_NAME}"
+    wget --no-check-certificate "${IMAGE_LOCATION}/${IMAGE_NAME}"
     IMAGE_SUFFIX="${IMAGE_NAME##*.}"
     if [ "${IMAGE_SUFFIX}" == "xz" ] ; then
       unxz -v "${IMAGE_NAME}"
@@ -213,6 +220,10 @@ if [ ! -f "${IMAGE_NAME}" ] ; then
     fi
 fi
 popd
+
+# NOTE(elfosardo): workaround for https://github.com/moby/moby/issues/44970
+# should be fixed in docker-ce 23.0.2
+sudo systemctl restart docker
 
 # Pulling all the images except any local image.
 for IMAGE_VAR in $(env | grep -v "_LOCAL_IMAGE=" | grep "_IMAGE=" | grep -o "^[^=]*") ; do

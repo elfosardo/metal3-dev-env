@@ -32,7 +32,7 @@ if [ "${CAPM3_RUN_LOCAL}" = true ]; then
 fi
 
 
-ANSIBLE_FORCE_COLOR=true ansible-playbook \
+ANSIBLE_FORCE_COLOR=true ansible-playbook -vvv \
     -e "working_dir=$WORKING_DIR" \
     -e "num_nodes=$NUM_NODES" \
     -e "extradisks=$VM_EXTRADISKS" \
@@ -43,7 +43,7 @@ ANSIBLE_FORCE_COLOR=true ansible-playbook \
     -b -v vm-setup/teardown-playbook.yml
 
 if [ "$USE_FIREWALLD" == "False" ]; then
- ANSIBLE_FORCE_COLOR=true ansible-playbook \
+ ANSIBLE_FORCE_COLOR=true ansible-playbook -vvv \
     -e "{use_firewalld: $USE_FIREWALLD}" \
     -e "external_subnet_v4: ${EXTERNAL_SUBNET_V4}" \
     -e "firewall_rule_state=absent" \
