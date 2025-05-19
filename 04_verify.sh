@@ -4,7 +4,7 @@
 # code called via iterate() to false trigger SC2317
 # shellcheck disable=SC2317
 
-set -u
+set -euxo pipefail
 
 # shellcheck disable=SC1091
 source lib/logging.sh
